@@ -35,25 +35,6 @@ func outgoingServer(outgoingPort string, output chan string) {
 
 	buf := make([]byte, 1024)
 
-	go func() {
-		for {
-			now := time.Now()
-			log.Println("sleeping for", DISCONNECT_TIMEOUT)
-			time.Sleep(DISCONNECT_TIMEOUT)
-			log.Println("awaik")
-
-			for id, client := range Clients {
-				log.Println("checking client with id", id)
-				if client.LastAliveTime.Before(now) {
-					delete(Clients, id)
-					msg := fmt.Sprint("client with id ", id, " was removed because he didn't send KEEP ALIVE command more than ", DISCONNECT_TIMEOUT)
-					log.Println(msg)
-					output <- msg
-				}
-			}
-		}
-	}()
-
 	for {
 		n, addr, err := ServerConn.ReadFromUDP(buf)
 		CheckError(err)
@@ -73,14 +54,18 @@ func outgoingServer(outgoingPort string, output chan string) {
 			if Clients[id] == nil {
 				continue
 			}
-			Clients[id].LastAliveTime = time.Now()
+			client := Clients[id]
+			client.LastAliveTime = time.Now()
+			go client.CheckTimoutLater(output)
 			break
 		case "CONNECT":
-			Clients[id] = &Client{
+			client := &Client{
 				Id:            id,
 				Addr:          addr,
 				LastAliveTime: time.Now(),
 			}
+			Clients[id] = client
+			go client.CheckTimoutLater(output)
 			output <- fmt.Sprintf("client with id %s connected", id)
 			break
 		case "DISCONNECT":
@@ -88,5 +73,20 @@ func outgoingServer(outgoingPort string, output chan string) {
 			output <- fmt.Sprintf("client with id %s disconnected", id)
 			break
 		}
+	}
+}
+
+func (client *Client) CheckTimoutLater(output chan string) {
+	now := time.Now()
+	time.Sleep(DISCONNECT_TIMEOUT)
+	if Clients[client.Id] == nil {
+		return
+	}
+	log.Println("checking timeout for client", client.Id)
+	if client.LastAliveTime.Before(now) {
+		delete(Clients, client.Id)
+		msg := fmt.Sprint("client ", client.Id, " was removed because he didn't send KEEP ALIVE command more than ", DISCONNECT_TIMEOUT)
+		log.Println(msg)
+		output <- msg
 	}
 }

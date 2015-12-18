@@ -9,7 +9,7 @@ import (
 
 func CheckError(err error) {
 	if err != nil {
-		log.Println("Error: ", err)
+		log.Fatal("Error: ", err)
 	}
 }
 

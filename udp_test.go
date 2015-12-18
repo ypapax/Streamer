@@ -8,6 +8,12 @@ import (
 )
 
 func Test_ConnectDisconnectClient(t *testing.T) {
+	var (
+		outgoingPort = "10001"
+		output       = make(chan string)
+	)
+	go outgoingServer(outgoingPort, output)
+
 	go ClientSendToUdpServer(outgoingPort, "CONNECT 1")
 	<-output
 	if Clients[Id("1")] == nil {
@@ -21,6 +27,11 @@ func Test_ConnectDisconnectClient(t *testing.T) {
 }
 
 func Test_ClientMustBeRemovedTimeout(t *testing.T) {
+	var (
+		outgoingPort = "10002"
+		output       = make(chan string)
+	)
+	go outgoingServer(outgoingPort, output)
 	DISCONNECT_TIMEOUT = time.Millisecond * 10
 	ClientSendToUdpServer(outgoingPort, "CONNECT 2")
 	msg := <-output
@@ -32,12 +43,19 @@ func Test_ClientMustBeRemovedTimeout(t *testing.T) {
 }
 
 func Test_KeepAlive(t *testing.T) {
+	var (
+		outgoingPort = "10003"
+		output       = make(chan string)
+	)
+	go outgoingServer(outgoingPort, output)
 	DISCONNECT_TIMEOUT = time.Millisecond * 10
 	ClientSendToUdpServer(outgoingPort, "CONNECT 3")
 	msg := <-output
 	log.Println(msg)
-	for i := 1; i <= 10; i++ {
-		time.Sleep(DISCONNECT_TIMEOUT / 3)
+	sleep := DISCONNECT_TIMEOUT / 3
+	for i := 1; i <= 5; i++ {
+		log.Println("sleeping for ", sleep, "in test")
+		time.Sleep(sleep)
 		ClientSendToUdpServer(outgoingPort, "ALIVE 3")
 	}
 
