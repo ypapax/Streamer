@@ -4,11 +4,16 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"runtime"
 	"strconv"
 )
 
 func CheckError(err error) {
 	if err != nil {
+		b := make([]byte, 2048)
+		n := runtime.Stack(b, false)
+		stack := string(b[:n])
+		log.Println("stack", stack)
 		log.Fatal("Error: ", err)
 	}
 }
