@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"log"
 	"net"
@@ -23,6 +24,17 @@ var (
 	Clients                          = make(map[Id]*Client)
 	DISCONNECT_TIMEOUT time.Duration = 30 * time.Second
 )
+
+func main() {
+	incomingPort := flag.String("incoming-port", "33333", "The server listens for an incoming stream on a port defined by a command line argument `incoming-port`. Any packet received on this port is immediately sent to any connected client.")
+	outgoingPort := flag.String("outgoing-port", "44444", "The server listens for client connections on a port defined by a command line argument `outgoing-port`.")
+	flag.Parse()
+	output := make(chan string)
+	RunStreamer(*incomingPort, *outgoingPort, output)
+	for {
+		log.Println(<-output)
+	}
+}
 
 func RunStreamer(incomingPort, outgoingPort string, output chan string) {
 	go incomingServer(incomingPort, output)
