@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -24,28 +25,17 @@ var (
 )
 
 func RunStreamer(incomingPort, outgoingPort string, output chan string) {
-	go incomingServer(incomingPort, outgoingPort, output)
+	go incomingServer(incomingPort, output)
 	go outgoingServer(outgoingPort, output)
 }
 
-func outgoingServer(outgoingPort string, output chan string) {
-
-	/* Lets prepare a address at any address at port */
-	ServerAddr, err := net.ResolveUDPAddr("udp", ":"+outgoingPort)
-	CheckError(err)
-
-	/* Now listen at selected port */
-	ServerConn, err := net.ListenUDP("udp", ServerAddr)
-	CheckError(err)
-	defer ServerConn.Close()
-	output <- fmt.Sprint("starting outgoing Server with port", outgoingPort)
-	buf := make([]byte, 1024)
+func outgoingServer(outgoingPort string, logger chan string) {
+	dataChan := make(chan *Data)
+	go listen(outgoingPort, logger, dataChan)
 
 	for {
-		n, addr, err := ServerConn.ReadFromUDP(buf)
-		CheckError(err)
-
-		outgoingClientMsg := string(buf[0:n])
+		data := <-dataChan
+		outgoingClientMsg := data.String()
 		log.Println("outgoingClientMsg", outgoingClientMsg)
 		msgParts := strings.Split(outgoingClientMsg, " ")
 		const allowedWordsInMsg = 2
@@ -61,22 +51,25 @@ func outgoingServer(outgoingPort string, output chan string) {
 				continue
 			}
 			client := Clients[id]
+			log.Println("client.LastAliveTime before alive command", client.LastAliveTime)
 			client.LastAliveTime = time.Now()
-			go client.checkTimoutLater(output)
+			log.Println("client.LastAliveTime after alive command", client.LastAliveTime)
+
+			go client.checkTimoutLater(logger)
 			break
 		case "CONNECT":
 			client := &Client{
 				Id:            id,
-				Addr:          addr,
+				Addr:          data.Addr,
 				LastAliveTime: time.Now(),
 			}
 			Clients[id] = client
-			go client.checkTimoutLater(output)
-			output <- fmt.Sprintf("client with id %s connected", id)
+			go client.checkTimoutLater(logger)
+			logger <- fmt.Sprintf("client with id %s connected", id)
 			break
 		case "DISCONNECT":
 			delete(Clients, id)
-			output <- fmt.Sprintf("client with id %s disconnected", id)
+			logger <- fmt.Sprintf("client with id %s disconnected", id)
 			break
 		}
 	}
@@ -97,49 +90,97 @@ func (client *Client) checkTimoutLater(output chan string) {
 	}
 }
 
-func incomingServer(incomingPort, outgoingPort string, output chan string) {
+type Data struct {
+	Bytes []byte
+	N     int
+	Addr  *net.UDPAddr
+}
+
+func (d *Data) String() string {
+	return string(d.Bytes[:d.N])
+}
+
+func listen(port string, logger chan string, received chan *Data) {
 	/* Lets prepare a address at any address at port */
-	ServerAddr, err := net.ResolveUDPAddr("udp", ":"+incomingPort)
+	ServerAddr, err := net.ResolveUDPAddr("udp", ":"+port)
 	CheckError(err)
 
+	log.Println("going to listen from port ", port)
 	/* Now listen at selected port */
 	ServerConn, err := net.ListenUDP("udp", ServerAddr)
 	CheckError(err)
 	defer ServerConn.Close()
 
 	buf := make([]byte, 1024)
-
+	logger <- fmt.Sprint("udp port is listening: ", port)
 	for {
-		n, _, err := ServerConn.ReadFromUDP(buf)
-		log.Println("getting incoming message with bytes count: ", n)
+		n, addr, err := ServerConn.ReadFromUDP(buf)
 		CheckError(err)
-		log.Println("len(Clients)", len(Clients))
-		for _, client := range Clients {
-			sendTo(client, outgoingPort, buf)
+		log.Printf("%s:%d gets %s from %s:%d\n", ServerAddr.IP, ServerAddr.Port, string(buf[:n]), addr.IP, addr.Port)
+		received <- &Data{
+			Bytes: buf[:n],
+			N:     n,
+			Addr:  addr,
 		}
 	}
 }
 
-func sendTo(client *Client, outgoingPort string, buf []byte) {
-	log.Println("11111111111111111111111111 ", client.Id)
+func incomingServer(incomingPort string, logger chan string) {
+	incomingPackages := make(chan *Data)
+	go listen(incomingPort, logger, incomingPackages)
+	for {
+		buf := <-incomingPackages
+		// log.Println("getting incoming message: ", string)
+		log.Println("len(Clients)", len(Clients))
+		for _, client := range Clients {
+			sendTo("0", client, buf)
+		}
+	}
+
+}
+
+func sendTo(outgoingPort string, client *Client, data *Data) {
 	msg := fmt.Sprint("sending outgoing message for client ", client.Id)
 	log.Println(msg)
-	log.Println("11111111111111111111111111 ", client.Id)
 
-	// output <- msg
+	send(outgoingPort, client.Addr, data)
+}
 
-	log.Println("1111111111111", msg)
-	ServerAddr, err := net.ResolveUDPAddr("udp", "127.0.0.1:"+outgoingPort)
+func send(outgoingPort string, targetAddr *net.UDPAddr, data *Data) {
+	sendBytes(outgoingPort, targetAddr, data.Bytes)
+}
+
+func sendBytes(outgoingPort string, remoteAddr *net.UDPAddr, buf []byte) {
+
+	localAddr, err := net.ResolveUDPAddr("udp", "127.0.0.1:"+outgoingPort)
 	CheckError(err)
 
-	// LocalAddr, err := net.ResolveUDPAddr("udp", "127.0.0.1:"+"10012")
-	// CheckError(err)
+	log.Printf("going to send %s from %s:%d to %s:%d\n", string(buf), localAddr.IP, localAddr.Port, remoteAddr.IP, remoteAddr.Port)
 
-	Conn, err := net.DialUDP("udp", ServerAddr, client.Addr)
+	Conn, err := net.DialUDP("udp", localAddr, remoteAddr)
 	CheckError(err)
+
+	log.Printf("sending %s from %s:%d to %s:%d\n", string(buf), localAddr.IP, localAddr.Port, remoteAddr.IP, remoteAddr.Port)
 
 	defer Conn.Close()
-	log.Println("1111111111111", msg)
 	_, err = Conn.Write(buf)
 	CheckError(err)
+}
+
+func sendStr(outgoingPort string, targetAddr *net.UDPAddr, msg string) {
+	sendBytes(outgoingPort, targetAddr, []byte(msg))
+}
+
+func CheckError(err error) {
+	if err != nil {
+		printStack()
+		log.Fatal("Error: ", err)
+	}
+}
+
+func printStack() {
+	b := make([]byte, 2048)
+	n := runtime.Stack(b, false)
+	stack := string(b[:n])
+	log.Println("stack", stack)
 }
