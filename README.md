@@ -1,5 +1,3 @@
-# Test Task
-
 ## Overview
 
 A Streamer is a server accepting a stream of UDP packets on one port (`incoming port`) and allowing multiple clients to connect on a different port (`outgoing port`) and receive that stream.
@@ -22,6 +20,3 @@ The server listens for client connections on a port defined by a command line ar
 
 (`id` is a an arbitrary identifier per connection)
 
-## Guidelines
-
-Code must be submitted with appropriate tests. these should cover cases of more than one connected client.
